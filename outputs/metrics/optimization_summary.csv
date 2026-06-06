@@ -1,0 +1,4 @@
+protocol,flip_angle_deg,refocusing_angle_deg,tr_ms,te_ms,bandwidth_khz,sequence_factor,mean_relative_sar,sar_reduction_percent,snr_preservation_proxy,artifact_risk_proxy,role
+Standard clinical template,90.0,180.0,2500.0,12.0,200.0,1.0,0.0006608832045458257,0.0,1.0,1.0,baseline comparison
+Low-SAR template,70.0,120.0,4200.0,10.0,320.0,0.55,5.817101555294357e-05,91.19798851706028,0.7686091535131477,0.5208333333333334,predefined safety template
+Optimized low-SAR protocol,90.0,110.0,5000.0,8.0,320.0,0.45,5.5532549595227465e-05,91.59722183689163,0.9882117688026186,0.41666666666666663,selected balance of SAR and image quality

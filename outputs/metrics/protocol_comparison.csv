@@ -1,0 +1,3 @@
+protocol,field_strength_t,tr_ms,te_ms,flip_angle_deg,refocusing_angle_deg,bandwidth_khz,sequence_factor,max_relative_sar,mean_relative_sar,sar_reduction_percent,comment
+Standard protocol,1.5,2500.0,12.0,90.0,180.0,200.0,1.0,0.001574975554831326,0.0006608832045458257,0.0,good signal but more SAR/artifact
+Low-SAR protocol,1.5,4200.0,10.0,70.0,120.0,320.0,0.55,0.000138629533466883,5.817101555294357e-05,91.19798851706028,safer balance with lower RF burden

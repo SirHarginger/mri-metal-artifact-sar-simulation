@@ -1,0 +1,29 @@
+{
+  "dicom_path": "/home/eddy/projects/mri-metal-artifact-sar-simulation/data/dicom/MR.0962_25.Image 2.0004.dcm",
+  "field_strength_t": null,
+  "flip_angle_deg": null,
+  "image_size": [
+    384,
+    384
+  ],
+  "manufacturer": "TOSHIBA",
+  "modality": "MR",
+  "mra_acquisition_type": "2D",
+  "patient_id": "0962/25",
+  "pixel_bandwidth_hz": null,
+  "pixel_spacing_mm": [
+    0.9896,
+    0.9896
+  ],
+  "pulse_sequence_name": null,
+  "scanner_model": "Titan",
+  "scanner_reported_sar_w_per_kg": null,
+  "scanning_sequence": "SE",
+  "sequence_name": null,
+  "sequence_variant": "NONE",
+  "series_description": "SG T1 Fsat+GD",
+  "slice_thickness_mm": 4.0,
+  "study_description": "PROSTATE",
+  "te_ms": null,
+  "tr_ms": null
+}
