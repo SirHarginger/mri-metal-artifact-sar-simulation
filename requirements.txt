@@ -1,0 +1,8 @@
+pydicom
+numpy
+scipy
+scikit-image
+matplotlib
+pandas
+pytest
+jupyter
