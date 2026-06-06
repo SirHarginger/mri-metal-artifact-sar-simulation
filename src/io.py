@@ -1,0 +1,202 @@
+"""DICOM and report I/O helpers."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pydicom
+
+
+def _json_ready(value: Any) -> Any:
+    """Convert common DICOM/numpy values to JSON-friendly Python objects."""
+
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(item) for item in value]
+    if hasattr(value, "original_string"):
+        return str(value)
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value
+
+
+def _get_float(dataset: pydicom.Dataset, name: str) -> float | None:
+    value = getattr(dataset, name, None)
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_text(dataset: pydicom.Dataset, name: str) -> str | None:
+    value = getattr(dataset, name, None)
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return "\\".join(str(item) for item in value)
+    return str(value)
+
+
+def extract_metadata(dataset: pydicom.Dataset, dicom_path: str | Path) -> dict:
+    """Extract a compact metadata summary useful for this simulation."""
+
+    pixel_spacing = getattr(dataset, "PixelSpacing", None)
+    if pixel_spacing is not None:
+        pixel_spacing = [float(item) for item in pixel_spacing]
+
+    scanner_sar = _get_float(dataset, "SAR")
+    if scanner_sar is None:
+        tag = dataset.get((0x0018, 0x1316))
+        if tag is not None:
+            try:
+                scanner_sar = float(tag.value)
+            except (TypeError, ValueError):
+                scanner_sar = None
+
+    rows = int(getattr(dataset, "Rows", 0) or 0)
+    columns = int(getattr(dataset, "Columns", 0) or 0)
+
+    metadata = {
+        "dicom_path": str(Path(dicom_path)),
+        "patient_id": _get_text(dataset, "PatientID"),
+        "study_description": _get_text(dataset, "StudyDescription"),
+        "series_description": _get_text(dataset, "SeriesDescription"),
+        "modality": _get_text(dataset, "Modality"),
+        "manufacturer": _get_text(dataset, "Manufacturer"),
+        "scanner_model": _get_text(dataset, "ManufacturerModelName"),
+        "image_size": [rows, columns],
+        "pixel_spacing_mm": pixel_spacing,
+        "slice_thickness_mm": _get_float(dataset, "SliceThickness"),
+        "sequence_name": _get_text(dataset, "SequenceName"),
+        "scanning_sequence": _get_text(dataset, "ScanningSequence"),
+        "sequence_variant": _get_text(dataset, "SequenceVariant"),
+        "pulse_sequence_name": _get_text(dataset, "PulseSequenceName"),
+        "mra_acquisition_type": _get_text(dataset, "MRAcquisitionType"),
+        "tr_ms": _get_float(dataset, "RepetitionTime"),
+        "te_ms": _get_float(dataset, "EchoTime"),
+        "flip_angle_deg": _get_float(dataset, "FlipAngle"),
+        "pixel_bandwidth_hz": _get_float(dataset, "PixelBandwidth"),
+        "field_strength_t": _get_float(dataset, "MagneticFieldStrength"),
+        "scanner_reported_sar_w_per_kg": scanner_sar,
+    }
+    return {key: _json_ready(value) for key, value in metadata.items()}
+
+
+def load_dicom(dicom_path: str | Path) -> tuple[np.ndarray, dict, pydicom.Dataset]:
+    """Load a DICOM image and return a 2D floating-point array plus metadata."""
+
+    path = Path(dicom_path)
+    dataset = pydicom.dcmread(path)
+    image = dataset.pixel_array.astype(np.float32)
+
+    if image.ndim > 2:
+        image = np.squeeze(image)
+    if image.ndim == 3:
+        image = image[0]
+    if image.ndim != 2:
+        raise ValueError(f"Expected a 2D DICOM image, got shape {image.shape}")
+
+    slope = _get_float(dataset, "RescaleSlope")
+    intercept = _get_float(dataset, "RescaleIntercept")
+    if slope is not None:
+        image = image * slope
+    if intercept is not None:
+        image = image + intercept
+
+    return image.astype(np.float32), extract_metadata(dataset, path), dataset
+
+
+def save_json(data: dict, output_path: str | Path) -> None:
+    """Save a dictionary as pretty JSON."""
+
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as file:
+        json.dump(_json_ready(data), file, indent=2, sort_keys=True)
+
+
+def write_pipeline_report(
+    output_path: str | Path,
+    metadata: dict,
+    segmentation_info: dict,
+    sar_summary: dict,
+    metrics_markdown: str,
+) -> None:
+    """Write a concise Markdown report for the pipeline run."""
+
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    optimized = metadata.get("optimized_protocol") or {}
+
+    lines = [
+        "# MRI Metal Artefact And Relative SAR Pipeline Report",
+        "",
+        "This report was generated by the Python DICOM pipeline. SAR outputs are relative, model-based SAR-like maps for protocol comparison only. They are not regulatory SAR estimates, not patient-specific local SAR validation, and not a replacement for scanner safety certification.",
+        "",
+        "## Proposal Focus",
+        "",
+        "The analysis focuses on the proposal objective: optimize low-SAR MRI protocol parameters for patients with prosthetic/metal implants while preserving measurable image quality. Artifact correction is evaluated as part of image-quality preservation, not as true recovery of signal that was never acquired.",
+        "",
+        "## Input DICOM",
+        "",
+        f"- Path: `{metadata.get('dicom_path')}`",
+        f"- Image size: `{metadata.get('image_size')}`",
+        f"- Pixel spacing: `{metadata.get('pixel_spacing_mm')}` mm",
+        f"- Sequence: `{metadata.get('sequence_name') or metadata.get('scanning_sequence')}`",
+        f"- TR / TE: `{metadata.get('tr_ms')}` ms / `{metadata.get('te_ms')}` ms",
+        f"- Flip angle: `{metadata.get('flip_angle_deg')}` degrees",
+        f"- Field strength: `{metadata.get('field_strength_t')}` T",
+        f"- Scanner-reported SAR: `{metadata.get('scanner_reported_sar_w_per_kg')}` W/kg",
+        "",
+        "## Segmentation",
+        "",
+        f"- Method: `{segmentation_info.get('method')}`",
+        f"- Implant/signal-void pixels: `{segmentation_info.get('implant_pixels')}`",
+        f"- Tissue pixels: `{segmentation_info.get('tissue_pixels')}`",
+        f"- Background/noise pixels: `{segmentation_info.get('background_pixels')}`",
+        f"- Correction method: `{metadata.get('correction_method')}`",
+        "",
+        "## Selected Optimized Protocol",
+        "",
+        f"- Selection rule: `{optimized.get('selection_rule')}`",
+        f"- Flip angle: `{optimized.get('flip_angle_deg')}` degrees",
+        f"- Refocusing angle: `{optimized.get('refocusing_angle_deg')}` degrees",
+        f"- TR / TE: `{optimized.get('tr_ms')}` ms / `{optimized.get('te_ms')}` ms",
+        f"- Bandwidth: `{optimized.get('bandwidth_khz')}` kHz",
+        f"- Sequence factor: `{optimized.get('sequence_factor')}`",
+        f"- Mean relative SAR: `{optimized.get('mean_relative_sar')}`",
+        f"- SAR reduction vs standard: `{optimized.get('sar_reduction_percent')}`%",
+        f"- SNR preservation proxy: `{optimized.get('snr_preservation_proxy')}`",
+        f"- Artifact risk proxy: `{optimized.get('artifact_risk_proxy')}`",
+        "",
+        "## Relative SAR Summary",
+        "",
+        f"- Standard max relative SAR: `{sar_summary.get('standard_max_relative_sar'):.6g}`",
+        f"- Standard mean relative SAR: `{sar_summary.get('standard_mean_relative_sar'):.6g}`",
+        f"- Low-SAR max relative SAR: `{sar_summary.get('low_sar_max_relative_sar'):.6g}`",
+        f"- Low-SAR mean relative SAR: `{sar_summary.get('low_sar_mean_relative_sar'):.6g}`",
+        f"- Mean SAR reduction: `{sar_summary.get('mean_sar_reduction_percent'):.2f}%`",
+        "",
+        "## Metrics Summary",
+        "",
+        metrics_markdown,
+        "",
+        "## Output Locations",
+        "",
+        "- Figures: `outputs/figures/`",
+        "- Technical maps: `outputs/maps/`",
+        "- CSV metrics: `outputs/metrics/`",
+        "- Reports and metadata JSON: `outputs/reports/`",
+    ]
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
